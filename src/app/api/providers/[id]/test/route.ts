@@ -69,14 +69,8 @@ function hasQoderToken(connection: any): boolean {
   return false;
 }
 
-/**
- * GHSA-jmq6-8j86-8xqj: `getCliRuntimeStatus()` spawns `sh -c 'command -v -- "$1"'` on the
- * host. That is the LOCAL_ONLY capability (Hard Rules #15/#17), but the connection-test
- * routes stay reachable remotely (a tunnel-served dashboard tests connections too). So
- * the probe itself is gated: callers that are not loopback / private LAN get no local
- * CLI diagnosis and the test proceeds on the upstream check alone. Server-internal
- * callers (the credential-health scheduler) keep the probe.
- */
+// GHSA-jmq6-8j86-8xqj: getCliRuntimeStatus() spawns on the host (LOCAL_ONLY capability),
+// but these routes stay remote-reachable — only loopback/LAN callers and the scheduler probe.
 export type ConnectionTestOptions = { allowLocalRuntimeProbe?: boolean };
 
 export async function getProviderRuntimeStatus(
