@@ -13,6 +13,8 @@ import { getDbInstance, isCloud, isBuildPhase } from "./db/core";
 import { ensureProxyLogsColumns } from "./db/schemaColumns";
 import { normalizeProxyHostForLog } from "./proxyLogHost";
 
+// Re-exported for existing callers; the helper lives in a zero-import leaf so DB modules
+// can use it without loading this module (which hydrates from SQLite at import time).
 export { normalizeProxyHostForLog };
 
 const shouldPersistToDisk = !isCloud && !isBuildPhase;
