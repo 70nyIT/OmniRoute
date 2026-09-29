@@ -1574,15 +1574,10 @@ test("DefaultExecutor.execute does not produce duplicate anthropic-version heade
   assert.equal(capturedHeaders["X-Stainless-Package-Version"], "0.112.1");
 
   const sentBody = JSON.parse(capturedBody) as { system?: Array<{ text?: string }> };
-  assert.match(
-    sentBody.system?.[0]?.text ?? "",
-    // Pinned to the canonical constant: #14627 bumped the advertised client to 2.1.280, and
-    // the literal 2.1.258 here went stale. The exact value is pinned in
-    // claude-codex-identity-version-sync.test.ts.
-    new RegExp(
-      `^x-anthropic-billing-header: cc_version=${CLAUDE_CODE_CLIENT_BILLING_VERSION.replace(/\./g, "\\.")}; cc_entrypoint=cli; cch=[0-9a-f]{5};$`
-    )
-  );
+  const cc = `x-anthropic-billing-header: cc_version=${CLAUDE_CODE_CLIENT_BILLING_VERSION}; `;
+  const billing = sentBody.system?.[0]?.text ?? "";
+  assert.equal(billing.slice(0, cc.length), cc, "cc_version tracks the constant (#14627)");
+  assert.match(billing.slice(cc.length), /^cc_entrypoint=cli; cch=[0-9a-f]{5};$/);
 });
 
 test('shouldForceResponsesUpstream respects explicit apiType="chat" even when namespace tools are present', () => {
