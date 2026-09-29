@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { getCachedProviderConnectionById } from "@/lib/db/readCache";
-import { updateProviderConnection } from "@/lib/db/providers";
+import { getProviderConnectionById, updateProviderConnection } from "@/lib/db/providers";
 import { isCloudEnabled, resolveProxyForConnection } from "@/lib/db/settings";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { syncToCloud } from "@/lib/cloudSync";
@@ -1045,6 +1045,15 @@ export async function testSingleConnection(
     lockModelIfPerModelQuota(provider, connectionId, probedModelId, "credits", 60 * 60 * 1000);
   }
 
+  // Decide activation on the row as it is NOW, not on the pre-probe snapshot:
+  // the probe can take seconds (and POST /api/providers fires one in the
+  // background on create), so an operator may have switched the connection off
+  // meanwhile. The cached snapshot would still read "never activated" and the
+  // passing test would turn it back on. Uncached read, right before the write.
+  const latestConnection =
+    ((await getProviderConnectionById(connectionId)) as typeof connection | null) ?? connection;
+  const operatorDisabled = isOperatorDisabled(latestConnection);
+
   // Unsupported validation capability is neutral: the probe established that
   // this provider cannot be verified through the generic test surface, not
   // that its credential is invalid. Do not mutate persisted credential health
@@ -1054,7 +1063,7 @@ export async function testSingleConnection(
   // default (isActive starts false on creation — see POST /api/providers),
   // silently regressing every provider without a test surface. Operator-disabled stays off.
   if (result.skipped === true) {
-    if (connection.isActive !== true && !isOperatorDisabled(connection)) {
+    if (latestConnection.isActive !== true && !operatorDisabled) {
       try {
         await updateProviderConnection(connectionId, { isActive: true });
       } catch (activateError) {
@@ -1115,7 +1124,7 @@ export async function testSingleConnection(
     // failure on an already-active, already-working connection must not take
     // it out of rotation — that's what the cooldown/rateLimitedUntil below is
     // for), so this never deactivates anything, nor re-enables an operator-disabled one.
-    ...(result.valid && !isOperatorDisabled(connection) ? { isActive: true } : {}),
+    ...(result.valid && !operatorDisabled ? { isActive: true } : {}),
     lastError: clearErrorState ? null : result.valid ? connection.lastError : result.error,
     lastErrorAt: clearErrorState ? null : result.valid ? connection.lastErrorAt : now,
     lastTested: now,
@@ -1144,7 +1153,13 @@ export async function testSingleConnection(
   }
 
   if (result.valid && (connection.apiKey || connection.accessToken)) {
-    const recovered = recoverKeyHealth(connectionId, "primary", connection.providerSpecificData);
+    // Fresh providerSpecificData: this object replaces the whole column, so a
+    // stale copy would drop what was written during the probe (the disable marker).
+    const recovered = recoverKeyHealth(
+      connectionId,
+      "primary",
+      latestConnection.providerSpecificData
+    );
     if (recovered) updateData.providerSpecificData = recovered;
   }
 
