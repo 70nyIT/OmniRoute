@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 const mod = await import("../../scripts/check/check-ai-attribution.mjs");
-const { findAiAttribution, scanRange, main, inputsFromGithubEvent } = mod;
+const { findAiAttribution, scanRange, main, inputsFromGithubEvent, loadAllowlist } = mod;
 
 test("findAiAttribution: rejects AI/bot Co-Authored-By trailers (both spellings, vendor e-mails)", () => {
   const cases = [
@@ -144,4 +144,71 @@ test("inputsFromGithubEvent: pull_request payload → range + title + body; othe
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("allowlist: skips only the listed historical full SHAs in --range; new tainted commits still fail", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-attr-allow-"));
+  const cwd = process.cwd();
+  try {
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "commit", "-q", "--allow-empty", "-m", "root");
+    const base = git(dir, "rev-parse", "HEAD");
+    git(
+      dir,
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "deps: bump x (#1)\n\nSigned-off-by: dependabot[bot] <support@github.com>"
+    );
+    const historical = git(dir, "rev-parse", "HEAD");
+    const list = path.join(dir, "allow.json");
+    fs.writeFileSync(
+      list,
+      JSON.stringify({ commits: { [historical]: { pr: 1, kind: "dependabot", reason: "r" } } })
+    );
+    process.chdir(dir);
+    const allow = loadAllowlist(list);
+    const skipped: string[] = [];
+    assert.deepEqual(scanRange(`${base}..HEAD`, allow, skipped), []);
+    assert.deepEqual(skipped, [historical]);
+    const log = console.log;
+    const err = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      assert.equal(main(["--range", `${base}..HEAD`, "--allowlist", list]), 0);
+      git(
+        dir,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "fix: new\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+      );
+      assert.equal(main(["--range", `${base}..HEAD`, "--allowlist", list]), 1);
+      // The allowlist never covers PR title/body.
+      assert.equal(main(["--pr-title", "Generated with Claude Code", "--allowlist", list]), 1);
+    } finally {
+      console.log = log;
+      console.error = err;
+    }
+    // Abbreviated SHAs and entries without a reason are rejected.
+    fs.writeFileSync(
+      list,
+      JSON.stringify({ commits: { [historical.slice(0, 10)]: { reason: "r" } } })
+    );
+    assert.throws(() => loadAllowlist(list), /not a full SHA/);
+    fs.writeFileSync(list, JSON.stringify({ commits: { [historical]: {} } }));
+    assert.throws(() => loadAllowlist(list), /no reason/);
+    assert.equal(loadAllowlist(path.join(dir, "missing.json")).size, 0);
+  } finally {
+    process.chdir(cwd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("allowlist file in the repo: every entry is a full SHA with a reason", () => {
+  const allow = loadAllowlist();
+  assert.ok(allow.size > 0);
 });

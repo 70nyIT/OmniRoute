@@ -23,10 +23,40 @@
 //   node scripts/check/check-ai-attribution.mjs --message-file .git/COMMIT_EDITMSG   # hook
 //   node scripts/check/check-ai-attribution.mjs --pr-title "…" --pr-body-file body.md
 // Exit 1 on any hit; prints every offending line with its commit.
+//
+// Historical allowlist: config/quality/ai-attribution-allowlist.json lists FULL commit SHAs that
+// were already merged into a release branch before (or past) this gate and cannot be rewritten —
+// the release PR scans the whole main..release range. It only narrows the --range scan; the
+// commit-msg hook and the PR title/body checks never consult it.
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const DEFAULT_ALLOWLIST = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "config",
+  "quality",
+  "ai-attribution-allowlist.json"
+);
+
+/** Full SHAs of historical, already-merged commits the --range scan skips (see header). */
+export function loadAllowlist(file = DEFAULT_ALLOWLIST) {
+  if (!fs.existsSync(file)) return new Set();
+  const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  const shas = Object.keys(doc?.commits ?? {});
+  for (const sha of shas) {
+    // Abbreviated SHAs would silently match more than the reviewed commit.
+    if (!/^[0-9a-f]{40}$/.test(sha))
+      throw new Error(`ai-attribution allowlist: not a full SHA: ${sha}`);
+    if (!doc.commits[sha]?.reason)
+      throw new Error(`ai-attribution allowlist: ${sha} has no reason`);
+  }
+  return new Set(shas);
+}
 
 /** Trailer-name patterns that denote an AI assistant, LLM or automation account. */
 // Only unambiguous AI/bot names: "Devin", "Cursor", "Jules", "Gemini" are also human first names or
@@ -71,11 +101,15 @@ function git(args) {
 }
 
 /** Every commit in `range` → [{ hash, subject, hits }] for the ones that hit. */
-export function scanRange(range) {
+export function scanRange(range, allow = new Set(), skipped = []) {
   const out = git(["log", "--format=%x01%H%x02%s%x02%B", range]);
   const bad = [];
   for (const rec of out.split("\u0001").filter(Boolean)) {
     const [hash, subject, body = ""] = rec.split("\u0002");
+    if (allow.has(hash)) {
+      skipped.push(hash);
+      continue;
+    }
     const hits = findAiAttribution(body);
     if (hits.length) bad.push({ hash: hash.slice(0, 10), subject: subject.trim(), hits });
   }
@@ -83,7 +117,14 @@ export function scanRange(range) {
 }
 
 function parseArgs(argv) {
-  const a = { range: null, messageFile: null, prTitle: null, prBodyFile: null, prBodyText: null };
+  const a = {
+    range: null,
+    messageFile: null,
+    prTitle: null,
+    prBodyFile: null,
+    prBodyText: null,
+    allowlist: null,
+  };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = argv[i + 1];
@@ -91,6 +132,7 @@ function parseArgs(argv) {
     else if (k === "--message-file") ((a.messageFile = v), i++);
     else if (k === "--pr-title") ((a.prTitle = v), i++);
     else if (k === "--pr-body-file") ((a.prBodyFile = v), i++);
+    else if (k === "--allowlist") ((a.allowlist = v), i++);
   }
   return a;
 }
@@ -135,7 +177,13 @@ export function main(argv = process.argv.slice(2)) {
     for (const h of hits) console.error(`    ${h}`);
   };
   if (a.range) {
-    for (const c of scanRange(a.range)) report(`commit ${c.hash} — ${c.subject}`, c.hits);
+    const skipped = [];
+    for (const c of scanRange(a.range, loadAllowlist(a.allowlist ?? undefined), skipped))
+      report(`commit ${c.hash} — ${c.subject}`, c.hits);
+    if (skipped.length)
+      console.log(
+        `[ai-attribution] skipped ${skipped.length} historical commit(s) listed in config/quality/ai-attribution-allowlist.json`
+      );
   }
   if (a.messageFile)
     report("commit message", findAiAttribution(fs.readFileSync(a.messageFile, "utf8")));
