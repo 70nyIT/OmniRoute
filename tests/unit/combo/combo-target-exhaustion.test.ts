@@ -12,6 +12,8 @@ import {
   __clearForTests as clearQuotaCache,
   setQuotaCache,
 } from "../../../src/domain/quotaCache.ts";
+import { modelCooldownResponse } from "../../../open-sse/utils/error.ts";
+import { LOCAL_MODEL_COOLDOWN_HEADER } from "../../../open-sse/utils/localCooldownHeader.ts";
 
 const log = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -1054,12 +1056,16 @@ test("OmniRoute's own local model_cooldown 429 never exhausts the provider (#173
   const cooldownText = "All credentials for model m1 are cooling down";
   const quotaFallback = { reason: "quota_exhausted", quotaResetHintMs: 3000 };
 
+  // The real local cooldown response carries the marker.
+  const localResponse = modelCooldownResponse({ model: "m1", retryAfter: 3 });
+  assert.equal(localResponse.headers.get(LOCAL_MODEL_COOLDOWN_HEADER), "model");
+
   const local = sets();
   const localResult = applyComboTargetExhaustion(target(), {
     ...baseOpts,
     errorText: cooldownText,
     structuredError: { code: "model_cooldown", type: "rate_limit_error" },
-    result: { status: 429, headers: new Headers({ "X-OmniRoute-Local-Cooldown": "model" }) },
+    result: { status: 429, headers: localResponse.headers },
     fallbackResult: quotaFallback,
     sets: local,
   });

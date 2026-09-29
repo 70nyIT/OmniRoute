@@ -40,7 +40,7 @@ import { isSharedWalletCredits402 } from "../accountFallback/sharedWalletCredits
 import { isClaudeMinuteRateLimitText, isExplicitClaudeQuota429Text } from "../usage/claudeQuota.ts";
 import { getCachedClaudeQuotaScopeDecision } from "@/domain/quotaCache";
 import { resolveProviderId } from "@/shared/constants/providers";
-import { LOCAL_MODEL_COOLDOWN_HEADER } from "../../utils/error.ts";
+import { LOCAL_MODEL_COOLDOWN_HEADER } from "../../utils/localCooldownHeader.ts";
 import type { ComboLogger, ResolvedComboTarget } from "./types.ts";
 
 // Connection-level failure statuses: the provider connection itself is likely bad (upstream
