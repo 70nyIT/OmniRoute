@@ -19,6 +19,7 @@ import {
   CONTEXT_1M_BETA_HEADER,
 } from "../../open-sse/services/claudeCodeCompatible.ts";
 import { runWithCapture } from "../../open-sse/utils/providerRequestLogging.ts";
+import { CLAUDE_CODE_CLIENT_BILLING_VERSION } from "../../src/shared/constants/claudeCodeClient.ts";
 
 class TestExecutor extends BaseExecutor {
   constructor(config = {}) {
@@ -1575,7 +1576,12 @@ test("DefaultExecutor.execute does not produce duplicate anthropic-version heade
   const sentBody = JSON.parse(capturedBody) as { system?: Array<{ text?: string }> };
   assert.match(
     sentBody.system?.[0]?.text ?? "",
-    /^x-anthropic-billing-header: cc_version=2\.1\.258\.1e2; cc_entrypoint=cli; cch=[0-9a-f]{5};$/
+    // Pinned to the canonical constant: #14627 bumped the advertised client to 2.1.280, and
+    // the literal 2.1.258 here went stale. The exact value is pinned in
+    // claude-codex-identity-version-sync.test.ts.
+    new RegExp(
+      `^x-anthropic-billing-header: cc_version=${CLAUDE_CODE_CLIENT_BILLING_VERSION.replace(/\./g, "\\.")}; cc_entrypoint=cli; cch=[0-9a-f]{5};$`
+    )
   );
 });
 
