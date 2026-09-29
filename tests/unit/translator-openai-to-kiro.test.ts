@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { v5 as uuidv5 } from "uuid";
 
 const { buildKiroPayload } = await import("../../open-sse/translator/request/openai-to-kiro.ts");
 
@@ -136,6 +137,9 @@ test("OpenAI -> Kiro maps invalid or empty assistant tool call arguments to empt
             },
           ],
         },
+        // #13174 strips a tool_use no tool_result answers (Bedrock 400s on it), so
+        // the fixture answers the call to keep the argument mapping under test.
+        { role: "tool", tool_call_id: "call_invalid", content: "file contents" },
         { role: "user", content: "continue" },
       ],
     },
@@ -163,6 +167,7 @@ test("OpenAI -> Kiro maps invalid or empty assistant tool call arguments to empt
             },
           ],
         },
+        { role: "tool", tool_call_id: "call_empty", content: "file contents" },
         { role: "user", content: "continue" },
       ],
     },
@@ -191,6 +196,7 @@ test("OpenAI -> Kiro maps invalid or empty assistant tool call arguments to empt
             },
           ],
         },
+        { role: "tool", tool_call_id: "call_tool_use", content: "file contents" },
         { role: "user", content: "continue" },
       ],
     },
@@ -882,6 +888,8 @@ test("OpenAI -> Kiro does not inject the '(empty)' placeholder on a trailing too
 });
 
 test("OpenAI -> Kiro generates stable non-random toolUseId when tool_call has no id", () => {
+  // Same derivation as openai-to-kiro.ts (uuidv5 of `${name}:${index}` in the Kiro namespace).
+  const EXPECTED_STABLE_ID = uuidv5("read_file:0", "a1b2c3d4-e5f6-7890-abcd-ef1234567890");
   const makePayload = () =>
     buildKiroPayload(
       "claude-sonnet-4",
@@ -897,6 +905,9 @@ test("OpenAI -> Kiro generates stable non-random toolUseId when tool_call has no
               },
             ],
           },
+          // #13174 strips a tool_use no tool_result answers, so the fixture answers
+          // the call with the id the translator derives (uuidv5 of name:index).
+          { role: "tool", tool_call_id: EXPECTED_STABLE_ID, content: "x contents" },
           { role: "user", content: "Continue" },
         ],
       },
@@ -914,6 +925,7 @@ test("OpenAI -> Kiro generates stable non-random toolUseId when tool_call has no
 
   assert.ok(id1, "toolUseId must be set even when id is absent");
   assert.equal(id1, id2, "toolUseId must be deterministic (same input → same id)");
+  assert.equal(id1, EXPECTED_STABLE_ID, "toolUseId must be the uuidv5 of name:index");
 });
 
 // Regression for #2446: an OpenAI-style `role:"tool"` message carrying NON-string

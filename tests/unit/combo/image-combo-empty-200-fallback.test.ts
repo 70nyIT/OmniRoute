@@ -216,7 +216,7 @@ test("fallback metadata reflects the additional attempt via X-OmniRoute-Fallback
   assert.equal(attempts, "1", "one leg failed over, so fallback attempts must be 1");
 });
 
-test("valid first-leg response does not invoke later legs", async () => {
+test("valid first-leg response is served even though later legs are dispatched in parallel", async () => {
   await resetStorage();
   await seedOpenRouterConnection();
   await seedTwoLegCombo("empty-200-valid-first-combo");
@@ -235,8 +235,13 @@ test("valid first-leg response does not invoke later legs", async () => {
   assert.equal(response.status, 200);
   const body = (await response.json()) as { data?: Array<{ b64_json?: string }> };
   assert.equal(body.data?.[0]?.b64_json, PNG_B64);
-  assert.equal(hits.length, 1, "first leg success must stop the combo (no later legs hit)");
+  // #13852 replaced the sequential priority loop with a parallel fan-out: every
+  // images-capable leg is dispatched up front and the first healthy success wins,
+  // so a later leg IS hit even when the first one is valid. What still holds is
+  // the priority dispatch order and that the first leg's image is the one served.
+  assert.equal(hits.length, 2, "parallel fan-out dispatches every leg (#13852)");
   assert.equal(hits[0].model, "openai/gpt-5-image-mini");
+  assert.equal(response.headers.get("X-OmniRoute-Model"), "openrouter/openai/gpt-5-image-mini");
 });
 
 test("all legs returning empty 200 yields a retryable 502 with sanitized error", async () => {
