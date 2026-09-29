@@ -133,12 +133,8 @@ import { sanitizeReasoningEffortForProvider } from "./base/reasoningEffort.ts";
 export { sanitizeReasoningEffortForProvider } from "./base/reasoningEffort.ts";
 import { mergeAbortSignals } from "./base/mergeAbortSignals.ts";
 export { mergeAbortSignals } from "./base/mergeAbortSignals.ts";
-import {
-  assertValidationCredentials,
-  prepareValidationFetch,
-  type ProviderCredentials,
-  type StrictValidationDispatch,
-} from "./base/validationDispatch.ts";
+import { assertValidationCredentials, validationFetch } from "./base/validationDispatch.ts";
+import type { ProviderCredentials, StrictValidationDispatch } from "./base/validationDispatch.ts";
 export type { ProviderCredentials, StrictValidationDispatch } from "./base/validationDispatch.ts";
 import { applyReasoningEffortRecovery } from "./base/reasoningEffortRecovery.ts";
 
@@ -746,8 +742,7 @@ export class BaseExecutor {
     // routing state untouched; the reactive 401/403 path is probe-guarded
     // in chatCore (#9817).
     if (!isProbeContext() && this.needsRefresh(credentials)) {
-      // Reject outside the refresh catch: that catch intentionally preserves
-      // normal traffic after refresh failure, but validation cannot change identity.
+      // Outside the refresh catch below, which would swallow the rejection.
       input.validationDispatch?.reject();
       try {
         // Fix A: wire onCredentialsRefreshed through runWithOnPersist so it runs
@@ -967,19 +962,12 @@ export class BaseExecutor {
             : requestOptions;
 
           try {
-            return await fetch(
-              requestUrl,
-              prepareValidationFetch(
-                input.validationDispatch,
-                {
-                  provider: this.provider,
-                  model,
-                  credentials: requestCredentials,
-                  url: requestUrl,
-                },
-                optionsWithSignal
-              )
-            );
+            return await validationFetch(
+              input.validationDispatch,
+              this.provider,
+              model,
+              requestCredentials
+            )(requestUrl, optionsWithSignal);
           } finally {
             if (timeoutId) clearTimeout(timeoutId);
           }

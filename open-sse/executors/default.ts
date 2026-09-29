@@ -61,7 +61,7 @@ import {
 } from "@/lib/providers/validation/urlHelpers";
 import { forwardOpencodeClientHeaders } from "../utils/opencodeHeaders.ts";
 import { resolveZaiUrl } from "./default/zaiFormatOverride.ts";
-import { normalizePoolConfig } from "./default/poolConfig.ts";
+import { normalizePoolConfig, rejectStrictPool } from "./default/poolConfig.ts";
 import { acquireNvidiaConcurrencySlot } from "./default/nvidiaConcurrencyGate.ts";
 import { resolveAlibabaProviderBaseUrl } from "@/shared/constants/alibabaProviderRegions";
 import { xiaomiAlternateUrl, xiaomiMimoChatUrl } from "./default/xiaomiTokenPlan.ts";
@@ -1150,9 +1150,6 @@ export class DefaultExecutor extends BaseExecutor {
   }
 
   async execute(input: ExecuteInput) {
-    // A pool may warm anonymous sessions or replace authentication headers.
-    // Strict validation must reject before creating/acquiring any such session.
-    if (input.validationDispatch && this.poolConfig) input.validationDispatch.reject();
     // #6846 Phase 1: per-connection concurrency cap for nvidia — no-op for every
     // other provider (returns null immediately, no semaphore key allocated).
     const releaseNvidiaSlot = await acquireNvidiaConcurrencySlot(
@@ -1167,7 +1164,7 @@ export class DefaultExecutor extends BaseExecutor {
   }
 
   private async executeWithSessionPool(input: ExecuteInput) {
-    const pool = this.getPool();
+    const pool = rejectStrictPool(input.validationDispatch, this.poolConfig) ?? this.getPool();
     if (!pool) return super.execute(input);
 
     const session = pool.acquire();

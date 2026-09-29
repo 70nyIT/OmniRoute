@@ -36,7 +36,7 @@ export function assertValidationCredentials(
   if (!Array.isArray(extraKeys) || extraKeys.length > 0) observer.reject();
 }
 
-export function prepareValidationFetch(
+function prepareValidationFetch(
   observer: StrictValidationDispatch | undefined,
   details: Pick<
     Parameters<StrictValidationDispatch["beforeFetch"]>[0],
@@ -53,4 +53,15 @@ export function prepareValidationFetch(
   // Automatic redirects would perform an unobserved second HTTP dispatch,
   // possibly to a different provider or credential scope.
   return { ...options, redirect: "error" };
+}
+
+/** `fetch` that runs the strict-validation fence first; plain `fetch` when there is no observer. */
+export function validationFetch(
+  observer: StrictValidationDispatch | undefined,
+  provider: string,
+  model: string,
+  credentials: ProviderCredentials
+): (url: string, options: RequestInit) => Promise<Response> {
+  return (url, options) =>
+    fetch(url, prepareValidationFetch(observer, { provider, model, credentials, url }, options));
 }
