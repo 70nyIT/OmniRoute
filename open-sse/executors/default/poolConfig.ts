@@ -35,12 +35,12 @@ export function normalizePoolConfig(value: Record<string, unknown>): PoolConfig 
 
 /**
  * A pool may warm anonymous sessions or replace authentication headers, so strict model
- * validation rejects before any session is created or acquired. Returns null otherwise.
+ * validation rejects before any session is created or acquired (and before any concurrency
+ * slot is taken).
  */
 export function rejectStrictPool(
   observer: StrictValidationDispatch | undefined,
   poolConfig: PoolConfig | undefined
-): null {
+): void {
   if (observer && poolConfig) observer.reject();
-  return null;
 }

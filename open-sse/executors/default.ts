@@ -1150,8 +1150,8 @@ export class DefaultExecutor extends BaseExecutor {
   }
 
   async execute(input: ExecuteInput) {
-    // #6846 Phase 1: per-connection concurrency cap for nvidia — no-op for every
-    // other provider (returns null immediately, no semaphore key allocated).
+    rejectStrictPool(input.validationDispatch, this.poolConfig);
+    // #6846 Phase 1: per-connection nvidia concurrency cap — no-op for other providers.
     const releaseNvidiaSlot = await acquireNvidiaConcurrencySlot(
       this.provider,
       input.credentials?.connectionId
@@ -1164,7 +1164,7 @@ export class DefaultExecutor extends BaseExecutor {
   }
 
   private async executeWithSessionPool(input: ExecuteInput) {
-    const pool = rejectStrictPool(input.validationDispatch, this.poolConfig) ?? this.getPool();
+    const pool = this.getPool();
     if (!pool) return super.execute(input);
 
     const session = pool.acquire();
