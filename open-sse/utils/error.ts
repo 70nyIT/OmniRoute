@@ -1116,6 +1116,13 @@ export function buildModelCooldownBody({
   };
 }
 
+/**
+ * Marks OmniRoute's OWN local model-cooldown 429. Its body is shaped exactly like
+ * CLIProxyAPI's upstream `model_cooldown` 429 (which #14190 classifies as quota),
+ * so only this header tells a combo that the cooldown is local and transient.
+ */
+export const LOCAL_MODEL_COOLDOWN_HEADER = "X-OmniRoute-Local-Cooldown";
+
 export function modelCooldownResponse({
   model,
   retryAfter,
@@ -1148,6 +1155,7 @@ export function modelCooldownResponse({
       headers: {
         "Content-Type": "application/json",
         "Retry-After": String(retryAfterSec),
+        [LOCAL_MODEL_COOLDOWN_HEADER]: "model",
       },
     }
   );
