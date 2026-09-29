@@ -16,7 +16,9 @@ test("findAiAttribution: rejects AI/bot Co-Authored-By trailers (both spellings,
     "Co-authored-by: Codex <codex@openai.com>",
     "Co-authored-by: GPT-5 <gpt@example.com>",
     "Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>",
-    "Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+    // dependabot[bot] is exempted (maintainer decision, 2026-09-29) — see the dedicated test below;
+    // every other [bot] account still fails.
+    "Co-authored-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
     "Co-authored-by: Someone <someone@anthropic.com>",
   ];
   for (const c of cases) assert.deepEqual(findAiAttribution(`subject\n\n${c}\n`), [c], c);
@@ -211,4 +213,19 @@ test("allowlist: skips only the listed historical full SHAs in --range; new tain
 test("allowlist file in the repo: every entry is a full SHA with a reason", () => {
   const allow = loadAllowlist();
   assert.ok(allow.size > 0);
+});
+
+test("findAiAttribution: exempts only GitHub's own dependabot[bot] co-author trailer", () => {
+  const dependabot =
+    "Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>";
+  assert.deepEqual(findAiAttribution(`chore(deps): bump x\n\n${dependabot}\n`), []);
+  // Any other bot account, a look-alike name, or the right name with another address still fails.
+  for (const c of [
+    "Co-authored-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
+    "Co-authored-by: dependabot[bot] <bot@example.com>",
+    "Co-authored-by: dependabot-preview[bot] <27856297+dependabot-preview[bot]@users.noreply.github.com>",
+    "Co-authored-by: Claude <noreply@anthropic.com>",
+  ]) {
+    assert.deepEqual(findAiAttribution(`subject\n\n${c}\n`), [c], c);
+  }
 });

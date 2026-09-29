@@ -66,6 +66,15 @@ const AI_NAME_RE =
 /** E-mail domains / addresses owned by AI vendors or bot accounts. */
 const AI_EMAIL_RE =
   /@(?:anthropic\.com|openai\.com|users\.noreply\.github\.com\b.*\[bot\]|noreply\.anthropic\.com)|noreply@anthropic\.com|codex@openai\.com|copilot@github\.com|\[bot\]@/i;
+/**
+ * GitHub's Dependabot co-authors its own dependency-bump commits. It is a first-party dependency
+ * bot, not an AI assistant, and it does not hide the real author, so the maintainer exempted it
+ * (2026-09-29, v3.8.51 release). Matched on BOTH the exact name and its exact noreply address, so
+ * no other `[bot]` account (or a look-alike name) can ride on this exemption.
+ */
+const DEPENDABOT_TRAILER_RE =
+  /^dependabot\[bot\]\s*<49699333\+dependabot\[bot\]@users\.noreply\.github\.com>$/i;
+
 /** Footers / trailers that advertise AI generation. */
 const AI_FOOTER_RE =
   /(generated (?:with|by)\s+\[?(?:claude|chatgpt|gpt|copilot|codex|gemini|cursor|devin|aider|windsurf|an? ai)|made with (?:claude|chatgpt|gpt|copilot|codex|gemini|cursor|devin|aider|windsurf)|🤖 generated with|^\s*claude-session:|^\s*codex-session:|^\s*(?:ai|llm)-generated\s*:)/i;
@@ -84,6 +93,7 @@ export function findAiAttribution(text) {
     );
     if (trailer) {
       const who = trailer[2];
+      if (DEPENDABOT_TRAILER_RE.test(who.trim())) continue;
       // name part = everything before the first "<" (not HTML sanitization — CodeQL js/incomplete-multi-character-sanitization does not apply)
       const name = who.split("<")[0];
       if (AI_NAME_RE.test(name) || AI_EMAIL_RE.test(who)) {
