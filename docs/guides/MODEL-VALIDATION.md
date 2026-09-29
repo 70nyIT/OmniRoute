@@ -102,6 +102,13 @@ A private async request guard prevents handlers activated during the proof, incl
 response/stream work, from executing in the validation scope. Normal requests retain their
 plugin behavior. Plugin configuration is included in the final transactional snapshot check.
 
+## Concurrency scope
+
+At most one validation runs per connection at a time (a second concurrent request for the
+same connection is refused). That guard is an in-memory set (`activeConnections` in
+`src/lib/modelValidation/service.ts`), so it is per process: it does not coordinate across
+multiple OmniRoute processes or instances sharing one database.
+
 ## What this does not establish
 
 The receipt describes one successful, bounded interoperability check at its timestamp. It

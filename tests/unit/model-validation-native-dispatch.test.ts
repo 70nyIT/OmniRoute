@@ -10,6 +10,7 @@ import {
   type StrictValidationDispatch,
 } from "../../open-sse/executors/base.ts";
 import { DefaultExecutor } from "../../open-sse/executors/default.ts";
+import { __test_resetLearnedReasoningEffortCaps } from "../../open-sse/services/learnedReasoningEffortCaps.ts";
 import { DEFAULT_POOL_CONFIG } from "../../open-sse/services/sessionPool/types.ts";
 
 const credentials = {
@@ -104,6 +105,51 @@ test("strict dispatch prevents a second physical HTTP call after recoverable 400
   );
   assert.deepEqual({ outcome, httpCalls }, { outcome: "strict dispatch rejected", httpCalls: 1 });
 });
+
+for (const strict of [true, false]) {
+  test(`reasoning_effort 400 retry ${strict ? "is rejected by strict dispatch" : "still happens on normal dispatch"}`, async (t) => {
+    __test_resetLearnedReasoningEffortCaps();
+    t.after(() => __test_resetLearnedReasoningEffortCaps());
+    const executor = new BaseExecutor("openai", {
+      baseUrl: "https://validation.invalid/v1/chat/completions",
+    });
+    const sentEfforts: unknown[] = [];
+    t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit = {}) => {
+      sentEfforts.push(JSON.parse(String(init.body)).reasoning_effort);
+      return sentEfforts.length === 1
+        ? Response.json(
+            {
+              error: {
+                message:
+                  "reasoning_effort: unknown variant `xhigh`, expected one of `none`, `high`, `medium`, `low`, `minimal`",
+              },
+            },
+            { status: 400 }
+          )
+        : Response.json({ choices: [{ message: { content: "ok" } }] });
+    });
+    const request = input();
+    request.body = {
+      model: request.model,
+      messages: [{ role: "user", content: "fixture" }],
+      reasoning_effort: "xhigh",
+    };
+    if (strict) request.validationDispatch = strictDispatch();
+    const outcome = await executor.execute(request).then(
+      async (result) => {
+        await result.response.text();
+        return "accepted";
+      },
+      (error: Error) => error.message
+    );
+    assert.deepEqual(
+      { outcome, sentEfforts },
+      strict
+        ? { outcome: "strict dispatch rejected", sentEfforts: ["xhigh"] }
+        : { outcome: "accepted", sentEfforts: ["xhigh", "high"] }
+    );
+  });
+}
 
 test("strict dispatch refuses session pools before creating or warming sessions", async (t) => {
   class PooledExecutor extends DefaultExecutor {
