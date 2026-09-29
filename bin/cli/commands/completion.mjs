@@ -5,6 +5,7 @@ import { t } from "../i18n.mjs";
 import { apiFetch } from "../api.mjs";
 import { resolveDataDir } from "../data-dir.mjs";
 import { listManifestTargets } from "../cli-manifest.mjs";
+import { loadModelCatalog, ModelCommandError } from "./model-api.mjs";
 
 // Target lists shared with `omniroute run` / `omniroute configure` — always
 // derived from the canonical manifest so the completion scripts cannot drift.
@@ -30,14 +31,14 @@ function readCache() {
 }
 
 async function refreshCache(opts = {}) {
+  // Fail before replacing the cache when the selected catalog is unavailable.
+  const models = (await loadModelCatalog(opts)).map((model) => model.id);
   let combos = [],
-    providers = [],
-    models = [];
+    providers = [];
   try {
-    const [cr, pr, mr] = await Promise.allSettled([
+    const [cr, pr] = await Promise.allSettled([
       apiFetch("/api/combos", opts),
       apiFetch("/api/providers", opts),
-      apiFetch("/api/models", opts),
     ]);
     if (cr.status === "fulfilled" && cr.value.ok) {
       const j = await cr.value.json();
@@ -46,10 +47,6 @@ async function refreshCache(opts = {}) {
     if (pr.status === "fulfilled" && pr.value.ok) {
       const j = await pr.value.json();
       providers = (j.providers || j.items || []).map((p) => p.id || p.name).filter(Boolean);
-    }
-    if (mr.status === "fulfilled" && mr.value.ok) {
-      const j = await mr.value.json();
-      models = (Array.isArray(j) ? j : j.data || []).map((m) => m.id).filter(Boolean);
     }
   } catch (err) {
     if (process.env.OMNIROUTE_DEBUG_COMPLETION) {
@@ -359,7 +356,18 @@ export function registerCompletion(program) {
     .option("--quiet", "Suppress output")
     .action(async (opts, cmd) => {
       const globalOpts = cmd.optsWithGlobals();
-      const data = await refreshCache(globalOpts);
+      let data;
+      try {
+        data = await refreshCache(globalOpts);
+      } catch (error) {
+        console.error(
+          error instanceof ModelCommandError
+            ? error.message
+            : "Unable to refresh model completions."
+        );
+        process.exitCode = error.exitCode || 1;
+        return;
+      }
       if (!opts.quiet && !globalOpts.quiet) {
         process.stdout.write(
           `Cached: ${data.combos.length} combos, ${data.providers.length} providers, ${data.models.length} models\n`
