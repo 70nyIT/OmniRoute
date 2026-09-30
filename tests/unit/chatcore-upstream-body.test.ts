@@ -689,6 +689,26 @@ test("preserves the full tool list when within the grok-cli limit", async () => 
   assert.equal(out.tools.length, 150);
 });
 
+// #13190: the getKnownToolLimit() branch used to run before the bypassDefaultToolLimit
+// check, so once a provider limit was known (proactive here, cached from a 400 otherwise)
+// the operator override was silently ignored. The bypass must win over the known limit.
+test("operator bypass wins over a known provider limit", async () => {
+  const tools = Array.from({ length: 250 }, (_, i) => ({
+    type: "function",
+    function: { name: `tool_${i}`, parameters: {} },
+  }));
+  const out = await prepareUpstreamBody({
+    translatedBody: { model: "grok-cli-model", messages: [], tools },
+    modelToCall: "grok-cli-model",
+    provider: "grok-cli",
+    targetFormat: "claude",
+    credentials: null,
+    bypassDefaultToolLimit: true,
+  });
+  assert.ok(Array.isArray(out.tools));
+  assert.equal(out.tools.length, 250);
+});
+
 // The web_search / web_fetch fallback replaces a hosted tool the client declared, and
 // the router executes its calls itself. Tools are sorted by name (#12234) before
 // namespaces are flattened, so behind a large MCP catalog (Codex with 200+ tools)
