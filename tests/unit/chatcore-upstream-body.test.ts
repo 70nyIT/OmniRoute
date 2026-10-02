@@ -689,10 +689,11 @@ test("preserves the full tool list when within the grok-cli limit", async () => 
   assert.equal(out.tools.length, 150);
 });
 
-// #13190: the getKnownToolLimit() branch used to run before the bypassDefaultToolLimit
-// check, so once a provider limit was known (proactive here, cached from a 400 otherwise)
-// the operator override was silently ignored. The bypass must win over the known limit.
-test("operator bypass wins over a known provider limit", async () => {
+// #13190: bypassDefaultToolLimit is the OpenCode *client* signal, not an operator override.
+// It lifts the generic default cap, but a provider's known hard limit (grok-cli 200, nvidia
+// 1536, or one learned from a real upstream 400) must still truncate — otherwise OpenCode
+// clients get a permanent upstream 400 for that provider.
+test("bypassDefaultToolLimit does not lift a known provider hard limit", async () => {
   const tools = Array.from({ length: 250 }, (_, i) => ({
     type: "function",
     function: { name: `tool_${i}`, parameters: {} },
@@ -706,7 +707,24 @@ test("operator bypass wins over a known provider limit", async () => {
     bypassDefaultToolLimit: true,
   });
   assert.ok(Array.isArray(out.tools));
-  assert.equal(out.tools.length, 250);
+  assert.equal(out.tools.length, 200);
+});
+
+test("bypassDefaultToolLimit still lifts the generic default cap for providers without a known limit", async () => {
+  const tools = Array.from({ length: 300 }, (_, i) => ({
+    type: "function",
+    function: { name: `tool_${i}`, parameters: {} },
+  }));
+  const out = await prepareUpstreamBody({
+    translatedBody: { model: "some-model", messages: [], tools },
+    modelToCall: "some-model",
+    provider: "openai",
+    targetFormat: "openai",
+    credentials: null,
+    bypassDefaultToolLimit: true,
+  });
+  assert.ok(Array.isArray(out.tools));
+  assert.equal(out.tools.length, 300);
 });
 
 // The web_search / web_fetch fallback replaces a hosted tool the client declared, and

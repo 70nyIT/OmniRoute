@@ -107,11 +107,6 @@ function truncateToolList(
 ): Body {
   if (!Array.isArray(bodyToSend.tools)) return bodyToSend;
 
-  // An operator bypass beats every automatic cap, including a cached/detected
-  // provider limit — otherwise the override is silently ignored once a limit
-  // has been learned from an earlier error response.
-  if (bypassDefaultToolLimit === true) return bodyToSend;
-
   const knownLimit = getKnownToolLimit(provider);
   if (knownLimit !== null) {
     if (bodyToSend.tools.length > knownLimit) {
@@ -125,6 +120,8 @@ function truncateToolList(
     }
     return bodyToSend;
   }
+
+  if (bypassDefaultToolLimit === true) return bodyToSend;
 
   const effectiveToolLimit = getEffectiveToolLimit(provider);
   if (bodyToSend.tools.length > effectiveToolLimit) {
