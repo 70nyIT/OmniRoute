@@ -44,18 +44,20 @@ function isValidPdfPagesArg(filePath: unknown, pages: unknown): boolean {
 }
 
 // Some models name the Read path `path` / `filePath`; Claude Code requires `file_path`.
-// Only applied when `file_path` is missing or empty.
 //
-// The alias key is KEPT on purpose. `/v1/messages` is only the transport envelope;
-// the tool schema -- and therefore the canonical parameter name -- belongs to the
-// client. Kilo/OpenCode declare `filePath`, so deleting it made every read fail
-// validation ("filePath is missing") and the model retried forever. Clients that
-// declared `file_path` simply ignore the extra key (issue #17294).
+// Both spellings are kept. `/v1/messages` is only the transport envelope; the tool
+// schema -- and therefore the canonical parameter name -- belongs to the client.
+// Claude Code reads `file_path`, Kilo/OpenCode read `filePath`. Models routed through
+// the `Read` cloak emit `file_path` directly, so mapping only toward `file_path`
+// never helped Kilo; mirror both and let each client decode the key it declared.
 function sanitizeFilePathArg(args: Record<string, unknown>): void {
-  if (typeof args.file_path === "string" && args.file_path) return;
-  const alias = [args.path, args.filePath].find((v) => typeof v === "string" && v);
-  if (!alias) return;
-  args.file_path = alias;
+  const path = [args.file_path, args.filePath, args.path].find(
+    (v) => typeof v === "string" && v
+  );
+  if (!path) return;
+  args.file_path = path;
+  args.filePath = path;
+  if (typeof args.path === "string") delete args.path;
 }
 
 function sanitizeReadArgs(args: Record<string, unknown>): void {
