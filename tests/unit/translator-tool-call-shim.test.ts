@@ -116,6 +116,36 @@ test("applyToolCallShimToBuffer: Read coerces numeric-string limit/offset", () =
   assert.equal(out.offset, 5);
 });
 
+// Issue #17294: Kilo/OpenCode declare `filePath` in their Read schema. The shim
+// must not delete the client's key while adding the Claude Code spelling.
+test("applyToolCallShimToBuffer: Read keeps filePath for clients that declare it", () => {
+  const out = JSON.parse(
+    applyToolCallShimToBuffer(
+      "read",
+      JSON.stringify({ filePath: "/repo/a.ts", offset: 1, limit: 5 })
+    )
+  );
+  assert.equal(out.filePath, "/repo/a.ts");
+  assert.equal(out.file_path, "/repo/a.ts");
+  assert.equal(out.offset, 1);
+  assert.equal(out.limit, 5);
+});
+
+test("applyToolCallShimToBuffer: Read keeps path alias for clients that declare it", () => {
+  const out = JSON.parse(
+    applyToolCallShimToBuffer("Read", JSON.stringify({ path: "/repo/a.ts" }))
+  );
+  assert.equal(out.path, "/repo/a.ts");
+  assert.equal(out.file_path, "/repo/a.ts");
+});
+
+test("applyToolCallShimToBuffer: Read does not add aliases when file_path is present", () => {
+  const out = JSON.parse(
+    applyToolCallShimToBuffer("Read", JSON.stringify({ file_path: "/repo/a.ts" }))
+  );
+  assert.deepEqual(out, { file_path: "/repo/a.ts" });
+});
+
 test("applyToolCallShimToBuffer: Read strips pages for non-PDF files", () => {
   const out = JSON.parse(
     applyToolCallShimToBuffer("Read", JSON.stringify({ file_path: "/etc/hosts", pages: "1-3" }))
@@ -304,6 +334,54 @@ test("streaming: Read suppresses raw pages delta and emits cleaned input at fini
     offset: 1,
     limit: 5,
   });
+});
+
+test("streaming: Read keeps the client's filePath alongside file_path (#17294)", () => {
+  const state = freshState();
+  const chunks = [
+    {
+      id: "chatcmpl-kilo",
+      model: "cc-main",
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_read",
+                function: { name: "read", arguments: "" },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                function: { arguments: '{"filePath":"/repo/a.ts"}' },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+  ];
+
+  const events = streamChunks(chunks, state);
+  const inputDeltas = events.filter(
+    (e) => e.type === "content_block_delta" && e.delta?.type === "input_json_delta"
+  );
+
+  assert.equal(inputDeltas.length, 1, "expected exactly one emitted Read delta");
+  const input = JSON.parse(inputDeltas[0].delta.partial_json);
+  assert.equal(input.filePath, "/repo/a.ts", "client-declared filePath must survive");
+  assert.equal(input.file_path, "/repo/a.ts", "Claude Code spelling must still be present");
 });
 
 test("streaming: submit_pr_review with missing arrays gets corrective delta at finish", () => {
