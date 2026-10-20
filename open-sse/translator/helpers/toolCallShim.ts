@@ -9,7 +9,8 @@
 // keyed by the tool name. The transformer must accept arbitrary input and
 // return a JSON-safe value.
 
-type ShimFn = (input: unknown) => unknown;
+type ToolSchema = Record<string, unknown>;
+type ShimFn = (input: unknown, schema?: ToolSchema) => unknown;
 
 function coerceToArray(v: unknown): unknown[] {
   if (Array.isArray(v)) return v;
@@ -43,25 +44,49 @@ function isValidPdfPagesArg(filePath: unknown, pages: unknown): boolean {
   );
 }
 
-// Some models name the Read path `path` / `filePath`; Claude Code requires `file_path`.
-//
-// Both spellings are kept. `/v1/messages` is only the transport envelope; the tool
-// schema -- and therefore the canonical parameter name -- belongs to the client.
-// Claude Code reads `file_path`, Kilo/OpenCode read `filePath`. Models routed through
-// the `Read` cloak emit `file_path` directly, so mapping only toward `file_path`
-// never helped Kilo; mirror both and let each client decode the key it declared.
-function sanitizeFilePathArg(args: Record<string, unknown>): void {
-  const path = [args.file_path, args.filePath, args.path].find(
-    (v) => typeof v === "string" && v
-  );
+const READ_PATH_KEYS = ["file_path", "filePath", "path"] as const;
+
+/** Exact spelling wins; restored Claude tool names may differ only in case. */
+export function findToolCallSchema(
+  name: string,
+  schemas?: Map<string, ToolSchema> | null
+): ToolSchema | undefined {
+  const exact = schemas?.get(name);
+  if (exact) return exact;
+  for (const [key, schema] of schemas ?? []) {
+    if (key.toLowerCase() === name.toLowerCase()) return schema;
+  }
+  return undefined;
+}
+
+function sanitizeFilePathArg(args: Record<string, unknown>, schema?: ToolSchema): void {
+  const properties = schema?.properties;
+  const declared =
+    properties && typeof properties === "object" && !Array.isArray(properties)
+      ? READ_PATH_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(properties, key))
+      : [];
+  const isPath = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+  // Prefer the client's valid declared field over a conflicting upstream alias.
+  const path = [...declared, ...READ_PATH_KEYS].map((key) => args[key]).find(isPath);
   if (!path) return;
+  if (declared.length > 0) {
+    for (const key of READ_PATH_KEYS) {
+      if (declared.includes(key)) {
+        if (!isPath(args[key])) args[key] = path;
+      } else {
+        delete args[key];
+      }
+    }
+    return;
+  }
+  // Legacy callers without a recognizable client path schema keep PR #17295's fallback.
   args.file_path = path;
   args.filePath = path;
   if (typeof args.path === "string") delete args.path;
 }
 
-function sanitizeReadArgs(args: Record<string, unknown>): void {
-  sanitizeFilePathArg(args);
+function sanitizeReadArgs(args: Record<string, unknown>, schema?: ToolSchema): void {
+  sanitizeFilePathArg(args, schema);
   // Coerce numeric-string limit/offset (some non-Anthropic models stringify everything).
   if (typeof args.limit === "string" && /^\d+$/.test(args.limit)) {
     args.limit = Number(args.limit);
@@ -81,7 +106,10 @@ function sanitizeReadArgs(args: Record<string, unknown>): void {
   }
   if (typeof args.offset === "number" && args.offset < 0) args.offset = 0;
 
-  if ("pages" in args && !isValidPdfPagesArg(args.file_path, args.pages)) {
+  if (
+    "pages" in args &&
+    !isValidPdfPagesArg(args.file_path ?? args.filePath ?? args.path, args.pages)
+  ) {
     delete args.pages;
   }
 }
@@ -91,10 +119,10 @@ const TOOL_SHIMS: Record<string, ShimFn> = {
   // models that emit oversized limits, negative offsets, stringified numbers, or stray
   // `pages` on non-PDF files. Buffer and emit one cleaned JSON delta so the client never
   // sees the bad fields. See `sanitizeReadArgs` for the per-field rules.
-  Read: (input) => {
+  Read: (input, schema) => {
     if (typeof input !== "object" || input === null || Array.isArray(input)) return input;
     const patched = { ...(input as Record<string, unknown>) };
-    sanitizeReadArgs(patched);
+    sanitizeReadArgs(patched, schema);
     return patched;
   },
   submit_pr_review: (input) => {
@@ -127,7 +155,7 @@ export function hasToolCallShim(name: string | undefined | null): boolean {
  * If the buffer is unparseable, returns the empty-object JSON `{}` after applying
  * the shim with `{}` as input (so required arrays still get injected).
  */
-export function applyToolCallShimToBuffer(name: string, raw: string): string {
+export function applyToolCallShimToBuffer(name: string, raw: string, schema?: ToolSchema): string {
   const shim = resolveToolCallShim(name);
   if (!shim) return raw;
 
@@ -138,7 +166,7 @@ export function applyToolCallShimToBuffer(name: string, raw: string): string {
     parsed = {};
   }
 
-  const patched = shim(parsed);
+  const patched = shim(parsed, schema);
   return JSON.stringify(patched);
 }
 
