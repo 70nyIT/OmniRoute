@@ -79,7 +79,8 @@ function sanitizeFilePathArg(args: Record<string, unknown>, schema?: ToolSchema)
     }
     return;
   }
-  // Legacy callers without a recognizable client path schema keep PR #17295's fallback.
+  // No recognizable client path schema: mirror the resolved path into file_path and filePath,
+  // and drop the `path` alias.
   args.file_path = path;
   args.filePath = path;
   if (typeof args.path === "string") delete args.path;
