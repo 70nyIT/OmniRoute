@@ -23,7 +23,7 @@ import {
   caseInsensitiveToolNameLookup,
   restoreOpenAIToolNames,
 } from "../translator/helpers/toolCallHelper.ts";
-import { restoreClaudeToolName } from "../services/claudeCodeToolRemapper.ts";
+import { restoreDeclaredToolName } from "../services/declaredToolCasing.ts";
 import { extractReplayableResponsesReasoningText } from "../services/reasoningInputPolicy.ts";
 import { sanitizeToolId } from "../translator/helpers/schemaCoercion.ts";
 import { stripEmptyOptionalToolArgs } from "../translator/response/openai-responses/pureHelpers.ts";
@@ -162,7 +162,8 @@ export function translateNonStreamingResponse(
   sourceFormat: string,
   toolNameMap?: Map<string, string> | null,
   toolSchemas?: Map<string, JsonRecord> | null,
-  requestedThinking?: boolean
+  requestedThinking?: boolean,
+  clientTools?: unknown
 ): JsonRecord;
 export function translateNonStreamingResponse(
   responseBody: unknown,
@@ -170,7 +171,8 @@ export function translateNonStreamingResponse(
   sourceFormat: string,
   toolNameMap?: Map<string, string> | null,
   toolSchemas?: Map<string, JsonRecord> | null,
-  requestedThinking?: boolean
+  requestedThinking?: boolean,
+  clientTools?: unknown
 ): unknown;
 export function translateNonStreamingResponse(
   responseBody: unknown,
@@ -178,7 +180,8 @@ export function translateNonStreamingResponse(
   sourceFormat: string,
   toolNameMap?: Map<string, string> | null,
   toolSchemas?: Map<string, JsonRecord> | null,
-  requestedThinking?: boolean
+  requestedThinking?: boolean,
+  clientTools?: unknown
 ): unknown {
   // If already in source format, return as-is
   if (targetFormat === sourceFormat) {
@@ -727,7 +730,8 @@ export function translateNonStreamingResponse(
       toRecord(intermediateOpenAI),
       toolNameMap ?? null,
       requestedThinking,
-      toolSchemas
+      toolSchemas,
+      clientTools
     );
   }
 
@@ -766,7 +770,8 @@ function resolveReasoningText(messageObj: JsonRecord): string {
  * Helper to convert an OpenAI chat.completion JSON object to Claude format for non-streaming.
  *
  * `toolNameMap` carries request-side aliases; when it does not resolve a name,
- * `restoreClaudeToolName` upgrades known Claude Code tools to their canonical
+ * `restoreDeclaredToolName` falls back to the CLIENT's declared spelling
+ * (`clientTools`), then upgrades known Claude Code tools to their canonical
  * PascalCase ("bash" → "Bash", "croncreate" → "CronCreate"). Without this, a
  * non-streaming upstream JSON body (or a stream:true request the upstream
  * answered with application/json) reaches Claude Code with lowercase tool_use
@@ -776,7 +781,8 @@ function convertOpenAINonStreamingToClaude(
   openaiResponse: JsonRecord,
   toolNameMap?: Map<string, string> | null,
   requestedThinking?: boolean,
-  toolSchemas?: Map<string, JsonRecord> | null
+  toolSchemas?: Map<string, JsonRecord> | null,
+  clientTools?: unknown
 ): JsonRecord {
   const choices = openaiResponse.choices as unknown[] | undefined;
   const isChoicesArray = Array.isArray(choices);
@@ -852,7 +858,7 @@ function convertOpenAINonStreamingToClaude(
       const fn = toRecord(toolObj.function);
       // An id-less call gets a random id; a timestamp collides across calls.
       const rawId = toString(toolObj.id) || undefined;
-      const name = restoreClaudeToolName(toString(fn.name), toolNameMap ?? null);
+      const name = restoreDeclaredToolName(toString(fn.name), toolNameMap ?? null, clientTools);
       const schema = findToolCallSchema(name, toolSchemas);
       const args =
         typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments || {});

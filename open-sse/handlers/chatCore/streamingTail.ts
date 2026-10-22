@@ -648,6 +648,9 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       }),
   });
 
+  // The pipeline can fail before the awaited response hooks return to chatCore.
+  deps.registerStreamFinalizers?.(onPipelineStreamError, onClientDisconnectFinalize);
+
   // For providers using Responses API format, translate stream back to openai (Chat Completions) format
   // UNLESS client is Droid CLI which expects openai-responses format back
   const needsResponsesTranslation =
@@ -728,7 +731,10 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       }),
       requestedThinking,
       customToolNames,
-      requestToolIdentityMap
+      requestToolIdentityMap,
+      // The CLIENT's declared tools[]: an Anthropic-format client gets its own
+      // tool-name casing back from any provider (OpenCode `read`, Claude Code `Read`).
+      (body as Record<string, unknown> | null | undefined)?.tools ?? null
     );
   } else {
     log?.debug?.("STREAM", `Standard passthrough mode`);
@@ -743,7 +749,8 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       apiKeyInfo,
       handleStreamFailure,
       clientResponseFormat,
-      requestToolIdentityMap
+      requestToolIdentityMap,
+      (body as Record<string, unknown> | null | undefined)?.tools ?? null
     );
   }
 

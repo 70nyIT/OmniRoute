@@ -169,7 +169,8 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
     if (!payload || payload === "[DONE]") continue;
     try {
       const parsed = JSON.parse(payload);
-      if (Array.isArray(parsed?.choices)) {
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      if (Array.isArray(parsed.choices)) {
         sawChoices = true;
       }
       chunks.push(parsed);
@@ -182,6 +183,7 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
 
   const first = chunks[0];
   const contentParts = [];
+  const refusalParts = [];
   const reasoningParts = [];
   type AccumulatedToolCall = {
     id: string | null;
@@ -208,6 +210,9 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
 
     if (typeof delta.content === "string" && delta.content.length > 0) {
       contentParts.push(delta.content);
+    }
+    if (typeof delta.refusal === "string" && delta.refusal.length > 0) {
+      refusalParts.push(delta.refusal);
     }
     if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
       reasoningParts.push(delta.reasoning_content);
@@ -269,6 +274,9 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
     role: "assistant",
     content: joinedContent,
   };
+  if (refusalParts.length > 0) {
+    message.refusal = refusalParts.join("");
+  }
   if (joinedReasoning) {
     message.reasoning_content = joinedReasoning;
   }
